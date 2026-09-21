@@ -1,0 +1,43 @@
+# Build trees and generated artifacts
+build/
+build-*/
+out/
+install/
+prefix/
+_artifacts/
+.cache/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+*.obj
+*.o
+*.a
+*.lib
+*.exe
+*.pdb
+*.ilk
+*.dll
+*.so
+*.dylib
+compile_commands.json
+
+# Test and validation debris (never committed). These patterns are anchored to
+# the repository root on purpose: an unanchored "Store/" would also match the
+# source directories that hold the durable store layer on a case-insensitive
+# filesystem.
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+/Store/
+/store-out/
+/scratch/
+/probe/
+
+# Tooling
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
