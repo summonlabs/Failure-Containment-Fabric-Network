@@ -312,10 +312,28 @@ VoidResult write_file_atomic(const std::filesystem::path& target, std::span<cons
   }
 
 #ifdef _WIN32
-  if (::MoveFileExW(temporary.wstring().c_str(), target.wstring().c_str(),
-                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0) {
-    (void)remove_file_if_present(temporary);
-    return Status{StatusCode::IoError, "atomic replace failed"};
+  // While a reader has the target open (an inspection, an antivirus or
+  // indexing scan) the replacement fails until the reader closes the file, so
+  // it is retried for a bounded time (about 2 s) instead of failing the write.
+  // A directory in the way is not transient and fails at once.
+  const std::wstring from = temporary.wstring();
+  const std::wstring to = target.wstring();
+  for (int attempt = 0;; ++attempt) {
+    if (::MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0) {
+      break;
+    }
+    const DWORD code = ::GetLastError();
+    const DWORD attributes = ::GetFileAttributesW(to.c_str());
+    const bool directory =
+        attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    const bool transient = (code == ERROR_ACCESS_DENIED || code == ERROR_SHARING_VIOLATION ||
+                            code == ERROR_LOCK_VIOLATION) &&
+                           !directory;
+    if (!transient || attempt >= 100) {
+      (void)remove_file_if_present(temporary);
+      return Status{StatusCode::IoError, "atomic replace failed"};
+    }
+    ::Sleep(20);
   }
 #else
   std::error_code error;

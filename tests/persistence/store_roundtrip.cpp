@@ -7,10 +7,13 @@
 //
 // Copyright 2026 Summon Software Labs.
 // Licensed under the Apache License, Version 2.0.
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include "store_support.hpp"
@@ -207,4 +210,31 @@ FCFN_TEST(store, snapshot_rotation_retains_only_the_configured_number_of_snapsho
     expected.push_back(std::move(view));
   }
   FCFN_CHECK(same_bytes(reopened->recovery().snapshot_payload, state_document(expected)));
+}
+
+FCFN_TEST(store, an_atomic_write_waits_for_a_reader_to_close) {
+  const fcfn::test::TempDir dir("store-atomic-reader");
+  const std::filesystem::path target = dir.path() / "state.bin";
+  const std::vector<std::byte> first(4, std::byte{1});
+  const std::vector<std::byte> second(6, std::byte{2});
+  FCFN_CHECK(fcfn::store::write_file_atomic(target, first, true).ok());
+  bool reader_opened = false;
+  bool written = false;
+  {
+    // Another tool reading the store (an inspection, a scan) holds the file
+    // open while it is replaced, and closes it shortly after.
+    std::ifstream reader(target, std::ios::binary);
+    reader_opened = reader.is_open();
+    std::thread writer([&target, &second, &written] {
+      written = fcfn::store::write_file_atomic(target, second, true).ok();
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    reader.close();
+    writer.join();
+  }
+  FCFN_CHECK(reader_opened);
+  // The replacement waits for the reader instead of failing the write.
+  FCFN_CHECK(written);
+  std::error_code error;
+  FCFN_CHECK(std::filesystem::file_size(target, error) == second.size());
 }
